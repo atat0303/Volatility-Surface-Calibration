@@ -42,5 +42,5 @@ Thumbs.db
 *.ipynb_checkpoints/
 
 # Environment variables
-.env
+# .env
 .env.local
