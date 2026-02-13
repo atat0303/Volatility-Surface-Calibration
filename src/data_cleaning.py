@@ -1,6 +1,12 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import os
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 def clean_col(c: str) -> str:
     # your columns have brackets and leading spaces like ' [C_IV]'
@@ -163,10 +169,29 @@ def generate_data_report(df_raw, df_clean):
     return report, report_tables
 #----------main---------
 
-df = pd.read_csv("/Users/abhishektandon/Desktop/Quant prep/Vol Surface/spx_eod_202301.txt")
+# Load paths from environment variables
+DATA_DIR = os.getenv("DATA_DIR", "data/raw/spx_eod_2023q1-cfph7w")
+DATA_FILE_NAME = os.getenv("DATA_FILE_NAME", "spx_eod_202301.txt")
+CLEANED_DATA_DIR = os.getenv("CLEANED_DATA_DIR", "data/cleaned_data")
+CLEANED_FILE_NAME = os.getenv("CLEANED_FILE_NAME", "temp_clean.csv")
+VIZ_DIR = os.getenv("VIZ_DIR", "visualizations/data_cleaning")
+
+# Construct full paths
+DATA_INPUT = os.path.join(DATA_DIR, DATA_FILE_NAME)
+DATA_OUTPUT = os.path.join(CLEANED_DATA_DIR, CLEANED_FILE_NAME)
+
+# Create output directories if they don't exist
+os.makedirs(os.path.dirname(DATA_OUTPUT), exist_ok=True)
+os.makedirs(VIZ_DIR, exist_ok=True)
+
+df = pd.read_csv(DATA_INPUT)
 df_proc = preprocess(df)
 df_proc = df_proc[df_proc["QUOTE_DATE"] == df_proc["QUOTE_DATE"].iloc[0]]
 summary, tables = generate_data_report(df, df_proc)
+
+# Save cleaned data
+df_proc.to_csv(DATA_OUTPUT, index=False)
+print(f"Cleaned data saved to: {DATA_OUTPUT}")
 
 print("===== DATASET SUMMARY =====")
 for k,v in summary.items():
@@ -183,7 +208,9 @@ plt.scatter(df_proc["Y"], df_proc["C_IV_MID"], s=5, alpha=0.4)
 plt.xlabel("Log-Moneyness ln(K/S)")
 plt.ylabel("Implied Vol")
 plt.title("Call IV Smile")
-plt.show()
+plt.savefig(os.path.join(VIZ_DIR, "iv_smile.png"), dpi=150, bbox_inches='tight')
+#plt.show()
+print(f"IV Smile saved to: {os.path.join(VIZ_DIR, 'iv_smile.png')}")
 
 # Term Structure
 plt.figure(figsize=(8,5))
@@ -191,7 +218,9 @@ plt.scatter(df_proc["T"], df_proc["C_IV_MID"], s=5, alpha=0.4)
 plt.xlabel("Time to Maturity (Years)")
 plt.ylabel("Implied Vol")
 plt.title("IV Term Structure")
-plt.show()
+plt.savefig(os.path.join(VIZ_DIR, "term_structure.png"), dpi=150, bbox_inches='tight')
+#plt.show()
+print(f"Term Structure saved to: {os.path.join(VIZ_DIR, 'term_structure.png')}")
 
 # Spread vs Moneyness
 plt.figure(figsize=(8,5))
@@ -199,4 +228,6 @@ plt.scatter(df_proc["Y"], df_proc["C_SPRD_REL"], s=5, alpha=0.4)
 plt.xlabel("Log-Moneyness")
 plt.ylabel("Relative Spread")
 plt.title("Liquidity vs Moneyness")
-plt.show()
+plt.savefig(os.path.join(VIZ_DIR, "liquidity_moneyness.png"), dpi=150, bbox_inches='tight')
+#plt.show()
+print(f"Liquidity plot saved to: {os.path.join(VIZ_DIR, 'liquidity_moneyness.png')}")
