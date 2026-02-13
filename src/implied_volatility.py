@@ -19,7 +19,10 @@ warnings.filterwarnings('ignore')
 load_dotenv()
 
 # Constants
-RISK_FREE_RATE = 0.0  # Will be updated from forward rate calculations later
+# For 2023 data: Fed Funds rate was ~4-5% (using 4.5% average)
+# SPX dividend yield ~1.5-2% (using 1.7% typical)
+RISK_FREE_RATE = 0.045  # 4.5% - approximate 2023 risk-free rate
+DIVIDEND_YIELD = 0.017  # 1.7% - SPX continuous dividend yield
 MAX_ITERATIONS = 100
 TOLERANCE = 1e-6
 INITIAL_GUESS_1 = 0.2  # 20% vol
@@ -36,9 +39,9 @@ os.makedirs(IV_OUTPUT_DIR, exist_ok=True)
 os.makedirs(IV_VIZ_DIR, exist_ok=True)
 
 
-def black_scholes_call(S, K, T, r, sigma):
+def black_scholes_call(S, K, T, r, sigma, q=DIVIDEND_YIELD):
     """
-    Calculate Black-Scholes call option price.
+    Calculate Black-Scholes call option price with dividend yield.
     
     Parameters:
     -----------
@@ -47,6 +50,7 @@ def black_scholes_call(S, K, T, r, sigma):
     T : float - Time to maturity (years)
     r : float - Risk-free rate
     sigma : float - Volatility
+    q : float - Continuous dividend yield
     
     Returns:
     --------
@@ -55,16 +59,16 @@ def black_scholes_call(S, K, T, r, sigma):
     if T <= 0 or sigma <= 0:
         return max(S - K, 0)
     
-    d1 = (np.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
+    d1 = (np.log(S / K) + (r - q + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
     d2 = d1 - sigma * np.sqrt(T)
     
-    call_price = S * norm.cdf(d1) - K * np.exp(-r * T) * norm.cdf(d2)
+    call_price = S * np.exp(-q * T) * norm.cdf(d1) - K * np.exp(-r * T) * norm.cdf(d2)
     return call_price
 
 
-def black_scholes_put(S, K, T, r, sigma):
+def black_scholes_put(S, K, T, r, sigma, q=DIVIDEND_YIELD):
     """
-    Calculate Black-Scholes put option price.
+    Calculate Black-Scholes put option price with dividend yield.
     
     Parameters:
     -----------
@@ -73,6 +77,7 @@ def black_scholes_put(S, K, T, r, sigma):
     T : float - Time to maturity (years)
     r : float - Risk-free rate
     sigma : float - Volatility
+    q : float - Continuous dividend yield
     
     Returns:
     --------
@@ -81,14 +86,14 @@ def black_scholes_put(S, K, T, r, sigma):
     if T <= 0 or sigma <= 0:
         return max(K - S, 0)
     
-    d1 = (np.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
+    d1 = (np.log(S / K) + (r - q + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
     d2 = d1 - sigma * np.sqrt(T)
     
-    put_price = K * np.exp(-r * T) * norm.cdf(-d2) - S * norm.cdf(-d1)
+    put_price = K * np.exp(-r * T) * norm.cdf(-d2) - S * np.exp(-q * T) * norm.cdf(-d1)
     return put_price
 
 
-def vega(S, K, T, r, sigma):
+def vega(S, K, T, r, sigma, q=DIVIDEND_YIELD):
     """
     Calculate vega (derivative of option price w.r.t. volatility).
     
@@ -99,6 +104,7 @@ def vega(S, K, T, r, sigma):
     T : float - Time to maturity (years)
     r : float - Risk-free rate
     sigma : float - Volatility
+    q : float - Continuous dividend yield
     
     Returns:
     --------
@@ -107,7 +113,7 @@ def vega(S, K, T, r, sigma):
     if T <= 0 or sigma <= 0:
         return 0
     
-    d1 = (np.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
+    d1 = (np.log(S / K) + (r - q + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
     vega_val = S * norm.pdf(d1) * np.sqrt(T)
     return vega_val
 
@@ -138,9 +144,20 @@ def implied_vol_secant(market_price, S, K, T, r, option_type='call',
     # Boundary checks
     if T <= 0:
         return np.nan
-    
-    intrinsic = max(S - K, 0) if option_type == 'call' else max(K - S, 0)
-    if market_price < intrinsic:
+
+    # No-arbitrage bounds (with discounting and continuous dividend yield q)
+    q = DIVIDEND_YIELD
+    disc_r = np.exp(-r * T)
+    disc_q = np.exp(-q * T)
+    if option_type == 'call':
+        lower_bound = max(S * disc_q - K * disc_r, 0.0)
+        upper_bound = S * disc_q
+    else:
+        lower_bound = max(K * disc_r - S * disc_q, 0.0)
+        upper_bound = K * disc_r
+
+    # Fail fast on clearly invalid market prices
+    if market_price < (lower_bound - 1e-12) or market_price > (upper_bound + 1e-12):
         return np.nan
     
     # Select pricing function
@@ -253,7 +270,29 @@ def generate_iv_report(df):
     dict - Report statistics
     """
     report = {}
-    
+
+    # Guard: empty dataframe
+    if len(df) == 0:
+        return {
+            'total_options': 0,
+            'call_success': 0,
+            'put_success': 0,
+            'call_success_rate': 0.0,
+            'put_success_rate': 0.0,
+            'call_iv_mean': np.nan,
+            'call_iv_std': np.nan,
+            'put_iv_mean': np.nan,
+            'put_iv_std': np.nan,
+            'call_error_mean': np.nan,
+            'call_error_std': np.nan,
+            'call_error_mae': np.nan,
+            'put_error_mean': np.nan,
+            'put_error_std': np.nan,
+            'put_error_mae': np.nan,
+            'call_iv_corr': np.nan,
+            'put_iv_corr': np.nan
+        }
+
     # Filter successful calculations
     df_call = df[df['C_IV_CALC'].notna()]
     df_put = df[df['P_IV_CALC'].notna()]
@@ -300,18 +339,26 @@ def plot_iv_comparison(df):
     fig.suptitle('Implied Volatility Analysis - Secant Method', fontsize=16, y=1.00)
     
     # 1. Call IV: Calculated vs Market
-    axes[0, 0].scatter(df_valid['C_IV_MID'], df_valid['C_IV_CALC'], 
-                       alpha=0.5, s=10, c='blue')
-    axes[0, 0].plot([0, 1], [0, 1], 'r--', lw=2)
+    x_call = df_valid['C_IV_MID']
+    y_call = df_valid['C_IV_CALC']
+    axes[0, 0].scatter(x_call, y_call, alpha=0.5, s=10, c='blue')
+    # Identity line spanning the range of call IVs
+    call_min = np.nanmin([x_call.min(), y_call.min()])
+    call_max = np.nanmax([x_call.max(), y_call.max()])
+    axes[0, 0].plot([call_min, call_max], [call_min, call_max], 'r--', lw=2)
     axes[0, 0].set_xlabel('Market Call IV')
     axes[0, 0].set_ylabel('Calculated Call IV')
     axes[0, 0].set_title('Call IV: Calculated vs Market')
     axes[0, 0].grid(True, alpha=0.3)
     
     # 2. Put IV: Calculated vs Market
-    axes[0, 1].scatter(df_valid['P_IV_MID'], df_valid['P_IV_CALC'], 
-                       alpha=0.5, s=10, c='green')
-    axes[0, 1].plot([0, 1], [0, 1], 'r--', lw=2)
+    x_put = df_valid['P_IV_MID']
+    y_put = df_valid['P_IV_CALC']
+    axes[0, 1].scatter(x_put, y_put, alpha=0.5, s=10, c='green')
+    # Identity line spanning the range of put IVs
+    put_min = np.nanmin([x_put.min(), y_put.min()])
+    put_max = np.nanmax([x_put.max(), y_put.max()])
+    axes[0, 1].plot([put_min, put_max], [put_min, put_max], 'r--', lw=2)
     axes[0, 1].set_xlabel('Market Put IV')
     axes[0, 1].set_ylabel('Calculated Put IV')
     axes[0, 1].set_title('Put IV: Calculated vs Market')
@@ -410,6 +457,8 @@ def main():
     print("IMPLIED VOLATILITY CALCULATOR - SECANT METHOD")
     print("Author: Daksh Kumar")
     print("Convention: Log-Moneyness ln(K/S)")
+    print(f"Risk-Free Rate: {RISK_FREE_RATE*100:.2f}%")
+    print(f"Dividend Yield: {DIVIDEND_YIELD*100:.2f}%")
     print("="*80)
     
     # Load cleaned data
