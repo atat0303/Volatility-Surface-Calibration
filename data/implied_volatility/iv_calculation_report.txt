@@ -1,0 +1,21 @@
+================================================================================
+IMPLIED VOLATILITY CALCULATION REPORT - SECANT METHOD
+================================================================================
+
+total_options: 5024
+call_success: 4972
+put_success: 5002
+call_success_rate: 98.96496815286625
+put_success_rate: 99.56210191082802
+call_iv_mean: 0.26656543099940583
+call_iv_std: 0.07541858873376599
+put_iv_mean: 0.22979862755230906
+put_iv_std: 0.06505153807510873
+call_error_mean: 0.07446833526328357
+call_error_std: 0.11547731944264483
+call_error_mae: 0.07450799105683843
+put_error_mean: -0.013425666729978029
+put_error_std: 0.0195099139192313
+put_error_mae: 0.017416849545536843
+call_iv_corr: -0.2526860464073515
+put_iv_corr: 0.9550315280588012

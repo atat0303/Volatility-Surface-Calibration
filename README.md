@@ -2,7 +2,7 @@
 
 A Python project for calibrating volatility surfaces using the Stochastic Volatility Inspired (SVI) model on SPX options data.
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 Volatility-Surface-Calibration/
@@ -71,9 +71,11 @@ VIZ_DIR=visualizations/data_cleaning
 
 **To switch data files:** Simply edit the `.env` file to point to different data files (e.g., different months or quarters).
 
-## Data Cleaning
+## Pipeline Overview
 
-### Purpose
+### 1. Data Cleaning
+
+#### Purpose
 The `data_cleaning.py` script:
 - Loads raw SPX options data
 - Cleans and filters options data (removes invalid spreads, negative prices, etc.)
@@ -81,7 +83,7 @@ The `data_cleaning.py` script:
 - Generates data quality reports
 - Saves cleaned data and visualizations
 
-### How to Run
+#### How to Run
 
 **From repository root:**
 ```bash
@@ -90,7 +92,7 @@ python -m src.data_cleaning
 
 **Current Working Directory:** Must be the repository root (`Volatility-Surface-Calibration/`)
 
-### Outputs
+#### Outputs
 
 1. **Cleaned Data CSV:** `data/cleaned_data/temp_clean.csv`
    - Processed options data ready for modeling
@@ -107,17 +109,65 @@ python -m src.data_cleaning
    - `term_structure.png` - Volatility term structure (maturity vs IV)
    - `liquidity_moneyness.png` - Liquidity analysis (spread vs moneyness)
 
+---
+
+### 2. Implied Volatility Calculation (Secant Method)
+
+#### Purpose
+The `implied_volatility.py` script (Author: Daksh Kumar):
+- Implements Black-Scholes option pricing
+- Calculates implied volatilities using **Secant Method** (root-finding)
+- Compares calculated IVs with market-quoted IVs
+- Validates Black-Scholes model accuracy on real data
+- Generates comprehensive error analysis and 3D volatility surfaces
+
+#### How to Run
+
+**From repository root:**
+```bash
+python -m src.implied_volatility
+```
+
+**Prerequisites:** Must run `data_cleaning.py` first to generate cleaned data.
+
+#### Outputs
+
+1. **Data:** `data/implied_volatility/implied_volatility_secant.csv`
+   - Full dataset with calculated implied volatilities
+   - Columns: `C_IV_CALC`, `P_IV_CALC`, `C_IV_ERROR`, `P_IV_ERROR`
+
+2. **Report:** `data/implied_volatility/iv_calculation_report.txt`
+   - Success rates for call/put IV calculations
+   - Mean, std dev, and correlation statistics
+   - Error metrics (mean error, MAE)
+
+3. **Visualizations:** `visualizations/implied_volatility/`
+   - `iv_comparison.png` - 6-panel comparison:
+     - Calculated vs Market IV scatter (calls & puts)
+     - Error distribution histograms
+     - IV smiles in log-moneyness space
+   - `iv_surface_3d.png` - 3D volatility surfaces for calls and puts
+
+#### Key Features
+- **Secant Method:** Numerically stable root-finding without derivative calculations
+- **Log-Moneyness Convention:** Uses ln(K/S) for all moneyness representations
+- **Error Analysis:** Quantifies discrepancies between Black-Scholes and market
+- **3D Visualization:** Shows full volatility surface (moneyness × maturity)
+
+---
+
 ## Dependencies
 
 Core packages:
 - `numpy` - Numerical computing
 - `pandas` - Data manipulation
 - `matplotlib` - Plotting and visualization
+- `scipy` - Statistical functions (norm.cdf, norm.pdf)
 - `python-dotenv` - Environment variable management
 
 See [`requirements.txt`](requirements.txt) for full dependency list.
 
-## 🔧 Configuration
+## Configuration
 
 ### Environment Variables (`.env`)
 
@@ -129,7 +179,7 @@ See [`requirements.txt`](requirements.txt) for full dependency list.
 | `CLEANED_FILE_NAME` | Cleaned data filename | `temp_clean.csv` |
 | `VIZ_DIR` | Visualization output directory | `visualizations/data_cleaning` |
 
-## 🎯 Usage Examples
+## Usage Examples
 
 ### Process Different Data Files
 
@@ -151,7 +201,7 @@ DATA_FILE_NAME=spx_eod_202302.txt
 python -m src.data_cleaning
 ```
 
-## 🧪 Development Workflow
+## Development Workflow
 
 1. **Activate virtual environment:**
    ```bash
@@ -177,7 +227,7 @@ python -m src.data_cleaning
    git push
    ```
 
-## 📝 Notes
+## Notes
 
 - **Working Directory:** Always run scripts from the repository root
 - **Module Execution:** Use `python -m` for proper module imports
