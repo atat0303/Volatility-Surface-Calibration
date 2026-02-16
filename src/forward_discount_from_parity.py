@@ -1,3 +1,51 @@
+
+from data_cleaning import preprocess
+import pandas as pd
+import numpy as np
+
+def _fit_forward_pv_from_parity_paper(K, imid, wt=None, n_atm=15,
+                                     pv_bounds=(0.5, 2.0), f_bounds=None):
+    """
+    Fit (f, pv) to imid ≈ pv*(f-K) using only n_atm points with smallest |imid|.
+    Weighted SSE if wt provided.
+    """
+    K = np.asarray(K, float)
+    imid = np.asarray(imid, float)
+    if wt is None:
+        wt = np.ones_like(imid)
+    else:
+        wt = np.asarray(wt, float)
+
+    # choose near-ATM: smallest |imid|
+    idx = np.argsort(np.abs(imid))
+    idx = idx[:min(n_atm, len(idx))]
+    K0 = K[idx]
+    im0 = imid[idx]
+    w0 = wt[idx]
+
+    # guesses like the paper
+    pv0 = 1.0
+    f0 = float(np.mean(im0 + K0))  # because imid + K ≈ f when pv≈1
+
+    if f_bounds is None:
+        f_bounds = (float(np.min(K0)), float(np.max(K0)))
+
+    def obj(x):
+        f, pv = float(x[0]), float(x[1])
+        err = pv * (f - K0) - im0
+        return float(np.sum(w0 * err * err))
+
+    res = minimize(
+        obj,
+        x0=np.array([f0, pv0]),
+        method="L-BFGS-B",
+        bounds=[f_bounds, pv_bounds],
+    )
+
+    f_hat, pv_hat = float(res.x[0]), float(res.x[1])
+    sse = float(res.fun)
+    return f_hat, pv_hat, sse, idx
+
 def infer_forward_discount_from_parity_best(
     df: pd.DataFrame,
     sofr_rate: float | None = None,     # <-- NEW (decimal, e.g. 0.0235)
@@ -143,3 +191,5 @@ def infer_forward_discount_from_parity_best(
         })    
     out = pd.DataFrame(rows).sort_values("T").reset_index(drop=True)
     return out
+def main():
+    
