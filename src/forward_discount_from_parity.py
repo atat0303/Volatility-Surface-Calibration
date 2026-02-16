@@ -2,6 +2,9 @@
 from data_cleaning import preprocess
 import pandas as pd
 import numpy as np
+import os
+from pathlib import Path
+from dotenv import load_dotenv
 
 def _fit_forward_pv_from_parity_paper(K, imid, wt=None, n_atm=15,
                                      pv_bounds=(0.5, 2.0), f_bounds=None):
@@ -191,5 +194,10 @@ def infer_forward_discount_from_parity_best(
         })    
     out = pd.DataFrame(rows).sort_values("T").reset_index(drop=True)
     return out
-def main():
-    
+def main():  
+  DATA_FILE_NAME = os.getenv("DATA_FILE_NAME", "spx_eod_202301.txt")
+  DATA_DIR = os.getenv("DATA_DIR", "data/raw/spx_eod_2023q1-cfph7w")
+  DATA_INPUT = os.path.join(DATA_DIR, DATA_FILE_NAME)
+  df = pd.read_csv(DATA_INPUT)
+  df_proc = preprocess(df)
+  fc = infer_forward_discount_from_parity_best(df_proc)
