@@ -1,10 +1,17 @@
 
-from data_cleaning import preprocess
+from src.data_cleaning import preprocess
 import pandas as pd
 import numpy as np
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+from scipy.optimize import minimize
+
+# Output directory
+FORWARD_CURVE_OUTPUT_DIR = 'data/forward_discount_from_parity'
+os.makedirs(FORWARD_CURVE_OUTPUT_DIR, exist_ok=True)
+
+load_dotenv()
 
 def _fit_forward_pv_from_parity_paper(K, imid, wt=None, n_atm=15,
                                      pv_bounds=(0.5, 2.0), f_bounds=None):
@@ -201,3 +208,15 @@ def main():
   df = pd.read_csv(DATA_INPUT)
   df_proc = preprocess(df)
   fc = infer_forward_discount_from_parity_best(df_proc)
+  
+  # Save forward curve to CSV
+  output_file = os.path.join(FORWARD_CURVE_OUTPUT_DIR, 'forward_curve.csv')
+  fc.to_csv(output_file, index=False)
+  print(f"\nForward curve saved: {output_file}")
+  
+  return fc
+
+if __name__ == "__main__":
+    fc = main()
+    if fc is not None:
+        print(fc.to_string(index=False))
