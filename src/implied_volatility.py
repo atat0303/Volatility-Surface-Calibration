@@ -11,6 +11,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from scipy.stats import norm
 import os
+import argparse
 from dotenv import load_dotenv
 import warnings
 warnings.filterwarnings('ignore')
@@ -31,6 +32,8 @@ INITIAL_GUESS_2 = 0.3  # 30% vol
 # Configuration from .env
 CLEANED_DATA_DIR = os.getenv('CLEANED_DATA_DIR', 'data/cleaned_data')
 CLEANED_FILE_NAME = os.getenv('CLEANED_FILE_NAME', 'temp_clean.csv')
+FORWARD_CURVE_DIR = 'data/forward_discount_from_parity'
+FORWARD_CURVE_FILE = 'forward_curve.csv'
 IV_OUTPUT_DIR = 'data/implied_volatility'
 IV_VIZ_DIR = 'visualizations/implied_volatility'
 
@@ -118,7 +121,31 @@ def vega(S, K, T, r, sigma, q=DIVIDEND_YIELD):
     return vega_val
 
 
-def implied_vol_secant(market_price, S, K, T, r, option_type='call', 
+def load_forward_curve():
+    """
+    Load forward curve data from CSV.
+    
+    Returns:
+    --------
+    pd.DataFrame or None - Forward curve data with columns [T, r_eff, q_eff]
+    """
+    forward_curve_path = os.path.join(FORWARD_CURVE_DIR, FORWARD_CURVE_FILE)
+    
+    if not os.path.exists(forward_curve_path):
+        print(f"Warning: Forward curve not found at {forward_curve_path}")
+        print("Run forward_discount_from_parity.py first to generate the curve.")
+        return None
+    
+    try:
+        fc = pd.read_csv(forward_curve_path)
+        print(f"Loaded forward curve with {len(fc)} maturities")
+        return fc[['T', 'r_eff', 'q_eff']]
+    except Exception as e:
+        print(f"Error loading forward curve: {e}")
+        return None
+
+
+def implied_vol_secant(market_price, S, K, T, r, q=DIVIDEND_YIELD, option_type='call', 
                        sigma0=INITIAL_GUESS_1, sigma1=INITIAL_GUESS_2,
                        max_iter=MAX_ITERATIONS, tol=TOLERANCE):
     """
@@ -131,6 +158,7 @@ def implied_vol_secant(market_price, S, K, T, r, option_type='call',
     K : float - Strike price
     T : float - Time to maturity (years)
     r : float - Risk-free rate
+    q : float - Continuous dividend yield
     option_type : str - 'call' or 'put'
     sigma0 : float - First initial guess
     sigma1 : float - Second initial guess
@@ -146,7 +174,6 @@ def implied_vol_secant(market_price, S, K, T, r, option_type='call',
         return np.nan
 
     # No-arbitrage bounds (with discounting and continuous dividend yield q)
-    q = DIVIDEND_YIELD
     disc_r = np.exp(-r * T)
     disc_q = np.exp(-q * T)
     if option_type == 'call':
@@ -166,8 +193,8 @@ def implied_vol_secant(market_price, S, K, T, r, option_type='call',
     # Secant method
     for i in range(max_iter):
         # Calculate function values
-        f0 = bs_func(S, K, T, r, sigma0) - market_price
-        f1 = bs_func(S, K, T, r, sigma1) - market_price
+        f0 = bs_func(S, K, T, r, sigma0, q) - market_price
+        f1 = bs_func(S, K, T, r, sigma1, q) - market_price
         
         # Check convergence
         if abs(f1) < tol:
@@ -195,20 +222,36 @@ def implied_vol_secant(market_price, S, K, T, r, option_type='call',
     return np.nan
 
 
-def calculate_implied_volatilities(df, r=RISK_FREE_RATE):
+def calculate_implied_volatilities(df, forward_curve=None, r_default=RISK_FREE_RATE, q_default=DIVIDEND_YIELD):
     """
     Calculate implied volatilities for all options in the dataframe.
     
     Parameters:
     -----------
     df : pd.DataFrame - Cleaned options data
-    r : float - Risk-free rate
+    forward_curve : pd.DataFrame - Forward curve with maturity-specific r_eff, q_eff (optional)
+    r_default : float - Default risk-free rate (used if forward_curve is None)
+    q_default : float - Default dividend yield (used if forward_curve is None)
     
     Returns:
     --------
     pd.DataFrame - DataFrame with calculated IVs
     """
     df = df.copy()
+    
+    # Merge forward curve if provided
+    use_forward_curve = forward_curve is not None
+    if use_forward_curve:
+        # Merge on T (maturity) to get maturity-specific rates
+        df = df.merge(forward_curve[['T', 'r_eff', 'q_eff']], on='T', how='left')
+        # Fill missing values with defaults
+        df['r_eff'].fillna(r_default, inplace=True)
+        df['q_eff'].fillna(q_default, inplace=True)
+        print("Using forward curve for maturity-specific r_eff and q_eff")
+    else:
+        df['r_eff'] = r_default
+        df['q_eff'] = q_default
+        print(f"Using constant rates: r={r_default:.4f}, q={q_default:.4f}")
     
     # Initialize columns for calculated IVs
     df['C_IV_CALC'] = np.nan
@@ -219,8 +262,11 @@ def calculate_implied_volatilities(df, r=RISK_FREE_RATE):
     print("Calculating implied volatilities using Secant method...")
     print(f"Total options: {len(df)}")
     
-    # Calculate for calls
+    # Calculate for calls and puts
     for idx, row in df.iterrows():
+        r = row['r_eff']
+        q = row['q_eff']
+        
         # Call IV
         c_iv = implied_vol_secant(
             market_price=row['C_MID'],
@@ -228,6 +274,7 @@ def calculate_implied_volatilities(df, r=RISK_FREE_RATE):
             K=row['K'],
             T=row['T'],
             r=r,
+            q=q,
             option_type='call'
         )
         df.at[idx, 'C_IV_CALC'] = c_iv
@@ -239,6 +286,7 @@ def calculate_implied_volatilities(df, r=RISK_FREE_RATE):
             K=row['K'],
             T=row['T'],
             r=r,
+            q=q,
             option_type='put'
         )
         df.at[idx, 'P_IV_CALC'] = p_iv
@@ -453,12 +501,16 @@ def main():
     """
     Main execution function.
     """
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(description='Calculate implied volatilities using Secant method')
+    parser.add_argument('--use-constants', action='store_true',
+                       help='Use constant r and q instead of forward curve (default: use forward curve)')
+    args = parser.parse_args()
+    
     print("="*80)
     print("IMPLIED VOLATILITY CALCULATOR - SECANT METHOD")
     print("Author: Daksh Kumar")
     print("Convention: Log-Moneyness ln(K/S)")
-    print(f"Risk-Free Rate: {RISK_FREE_RATE*100:.2f}%")
-    print(f"Dividend Yield: {DIVIDEND_YIELD*100:.2f}%")
     print("="*80)
     
     # Load cleaned data
@@ -473,9 +525,23 @@ def main():
         print("Please run data cleaning first: python -m src.data_cleaning")
         return
     
+    # Load forward curve or use constants
+    forward_curve = None
+    if args.use_constants:
+        print(f"\nMode: Using constant rates")
+        print(f"Risk-Free Rate: {RISK_FREE_RATE*100:.2f}%")
+        print(f"Dividend Yield: {DIVIDEND_YIELD*100:.2f}%")
+    else:
+        print(f"\nMode: Using forward curve (maturity-specific rates)")
+        forward_curve = load_forward_curve()
+        if forward_curve is None:
+            print("\nFalling back to constant rates...")
+            print(f"Risk-Free Rate: {RISK_FREE_RATE*100:.2f}%")
+            print(f"Dividend Yield: {DIVIDEND_YIELD*100:.2f}%")
+    
     # Calculate implied volatilities
     print("\n" + "="*80)
-    df_with_iv = calculate_implied_volatilities(df, r=RISK_FREE_RATE)
+    df_with_iv = calculate_implied_volatilities(df, forward_curve=forward_curve)
     
     # Generate report
     print("\n" + "="*80)
